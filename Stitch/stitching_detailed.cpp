@@ -332,6 +332,11 @@ int main(int argc, char* argv[])
 
     cv::setBreakOnError(true);
 
+	/*
+		将程序运行需要的输入参数以及需要拼接的图像读入内存，
+		检查图像是否多于2张
+	*/
+
     int retval = parseCmdArgs(argc, argv);
     if (retval)
         return retval;
@@ -344,6 +349,8 @@ int main(int argc, char* argv[])
         return -1;
     }
 
+
+
     double work_scale = 1, seam_scale = 1, compose_scale = 1;
     bool is_work_scale_set = false, is_seam_scale_set = false, is_compose_scale_set = false;
 
@@ -352,6 +359,10 @@ int main(int argc, char* argv[])
     int64 t = getTickCount();
 #endif
 
+	/* 特征点检测
+	判断选择是surf还是orb特征点检测(默认是surf)以及对图像进行预处理(尺度缩放)
+	然后计算每幅图像的特征点，以及特征点描述子
+	*/
     Ptr<FeaturesFinder> finder;
     if (features_type == "surf")
     {
@@ -397,7 +408,9 @@ int main(int argc, char* argv[])
         else
         {
             if (!is_work_scale_set)
-            {
+            {	
+				//计算work_scale，将图像resize到面积在work_megapix*10^6以下
+				//work_megapix默认是0.6
                 work_scale = min(1.0, sqrt(work_megapix * 1e6 / full_img.size().area()));
                 is_work_scale_set = true;
             }
@@ -405,10 +418,18 @@ int main(int argc, char* argv[])
         }
         if (!is_seam_scale_set)
         {
+			//计算seam_scale，将图像resize到面积在seam_megapix*10^6以下
+			//seam_megapix默认是0.1
             seam_scale = min(1.0, sqrt(seam_megapix * 1e6 / full_img.size().area()));
             seam_work_aspect = seam_scale / work_scale;
             is_seam_scale_set = true;
         }
+		
+		/**
+		 * 计算图像特征点，以及计算特征点描述子
+		 * 并将img_idx设置为i
+		 *
+		 */
 
         (*finder)(img, features[i]);
         features[i].img_idx = i;
@@ -428,9 +449,14 @@ int main(int argc, char* argv[])
 #if ENABLE_LOG
     t = getTickCount();
 #endif
+	/*	图像匹配
+		对任意两副图形进行特征点匹配，然后使用查并集法，将图片的匹配关系找出，
+		并删除那些不属于同一全景图的图片。
+	 */
+
     vector<MatchesInfo> pairwise_matches;
-    BestOf2NearestMatcher matcher(try_gpu, match_conf);
-    matcher(features, pairwise_matches);
+    BestOf2NearestMatcher matcher(try_gpu, match_conf); //最近邻和次近邻法 
+    matcher(features, pairwise_matches); //对每两个图片进行matcher，20-》400 matchers.cpp 502  
     matcher.collectGarbage();
     LOGLN("Pairwise matching, time: " << ((getTickCount() - t) / getTickFrequency()) << " sec");
 
